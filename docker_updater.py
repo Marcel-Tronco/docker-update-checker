@@ -3,6 +3,7 @@ import urllib.parse
 import datetime
 import dateutil.parser as parser
 import docker
+from typing import List
 
 class DockerApiError(Exception):
   def __init__(self):
@@ -14,24 +15,31 @@ def test_tester():
 url_quote = urllib.parse.quote
 open_todos = 0
 
-def send_info(info):
+def send_info(info: str) -> None:
   # todo
   not_implemented_yet("send_info")
   return
 
-def not_implemented_yet(function_name):
+def not_implemented_yet(function_name: str) -> None:
   print(f"{function_name} not implemented yet ¯\_(ツ)_/¯")
   global open_todos
   open_todos += 1
   return
 
-def get_image_tags(repo, image, page="1"):
-  url = f"https://hub.docker.com/v2/repositories/{url_quote(repo)}/{url_quote(image)}/tags?page_size=1&page={page}"
+def clean_string(str: str) -> str:
+  not_implemented_yet("clean_string")
+  return str
+
+def get_image_tags(repo: str, image: str, page: int = 1) -> List[dict]:
+
+  url = f"https://hub.docker.com/v2/repositories/{clean_string(repo)}/{clean_string(image)}/tags?page_size=1&page={page}"
+  print(url)
   r = requests.get(url)
-  return r.json()
+  json = r.json()
+  return json["results"]
   # todo: - handling for multipage cases
 
-def load_running_containers():
+def load_running_containers() -> List[dict]:
   # todo the loading
   return [{
     "image_name": "string-gen",
@@ -42,17 +50,17 @@ def load_running_containers():
     "open_update": None
   }]
 
-def save_container_data(updated_containers):
+def save_container_data(updated_containers: List[dict]) -> None:
   # todo
   not_implemented_yet("save_container_data")
   return
 
-def check_image(container_data, image_tags):
+def check_image(container_data: List[dict], image_tags: List[dict]) -> None:
   # todo
   not_implemented_yet("check_image")
   return
 
-def update_container(container):
+def update_container(container: dict) -> dict:
   # todo
   not_implemented_yet("update_container")
   try:
@@ -65,12 +73,12 @@ def update_container(container):
   except Exception:
     raise DockerApiError #from None
 
-def gather_update_info(old_containers, updated_containers):
+def gather_update_info(old_containers: List[dict], updated_containers: List[dict]) -> str:
   # todo
   not_implemented_yet("gather_update_info")
   return
 
-def send_info(info):
+def send_info(info: str) -> None:
   # todo
   not_implemented_yet("send_info")
   return
