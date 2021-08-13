@@ -1,0 +1,11 @@
+[{
+  "image_name": "string-gen",
+  "repo": "dockercoursemk",
+  "image_id": "sha256:2c9e87da2df22ee5b612e8c0fabd6c0961ef17c1a7c3ce4481115adf72940774",
+  "tag": "4.1.0",
+  "version_date": "2021-03-10T13:37:34.734372Z",
+  "open_update": {
+    "tag_updates": null,
+    "new_tags": []
+    }
+}]
