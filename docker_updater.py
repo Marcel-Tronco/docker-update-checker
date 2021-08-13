@@ -62,10 +62,24 @@ def get_current_tag_data(current_tag: str, image_tags: dict) -> Union[dict, None
       return tag_data["name"]
   return None
 
-def get_tag_updates(container_data: dict, current_tag: dict) -> Tuple[Union[dict, None], bool]:
+def get_tag_data(tag_name: str, image_tags) -> Union[dict, None]:
+  for tag in image_tags["results"]:
+    if tag["name"] == tag_name:
+      return tag
+  return None
+
+def check_update(container: dict, tag_data: dict) -> Union[dict, None]:
   # todo
-  not_implemented_yet("get_tag_updates")
-  return None, True
+  not_implemented_yet("check_update")
+  return None
+
+def get_tag_updates(container_data: dict, image_tags: dict) -> Tuple[Union[dict, None], bool]:
+  tag_done = False
+  tag_data = get_tag_data(container_data["tag"], image_tags)
+  tag_update_data = check_update(container_data, tag_data)
+  if tag_data != None or image_tags["next"] == None:
+    tag_done = True 
+  return tag_update_data, tag_done
 
 def get_new_tags(container_data: dict, image_tags: dict) -> Tuple[Union[dict, None], bool]:
   # todo
