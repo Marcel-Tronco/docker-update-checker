@@ -1,10 +1,9 @@
+from docker.api import image
 import requests
 import urllib.parse
 import datetime
-import dateutil.parser as parser
 import docker
-from typing import List, Type, Union, Tuple
-
+from typing import List, Union, Tuple
 
 # Errors
 
@@ -36,12 +35,15 @@ architecture = "architecture"
 # timestamp utils
 
 class DockerTimeString(str):
-  DOCKER_TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
+  DOCKER_TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%f'
   @classmethod
   def datetime_to_dts(cls, datetime: datetime.datetime) -> str:
     return datetime.strftime(DockerTimeString.DOCKER_TIME_FORMAT)
   @classmethod
   def dts_to_datetime(cls, time_string: str) -> datetime.datetime:
+    time_string = time_string.rstrip("Z")
+    end_index = 26 if len(time_string) >= 26 else None
+    time_string = time_string[0:end_index]
     return datetime.datetime.strptime(time_string, DockerTimeString.DOCKER_TIME_FORMAT)
   def __new__(cls, docker_time_obj: Union[str, datetime.datetime]):
     if type(docker_time_obj) == str:
@@ -69,11 +71,12 @@ def load_running_containers() -> dict:
   # todo the loading
   not_implemented_yet("load_running_containers")
   return {
-    "dockercoursemk/string-gen": {
-      "image_name": "string-gen",
-      "repo": "dockercoursemk",
-      "image_id": "sha256:asdf68b48edc06ed8cbb006422a386fdeef8436a151170f470031b97d3d6e5db",
-      "tag": "3.2.6",
+    "e55fc8bd648d1a459a8636f0e1817ba23ef7b2261fa3939971a92e47f07ccde2": {
+      "is_local": False,
+      "image_name": "postgres",
+      "repo": "library",
+      "image_id": "sha256:acf5fb8bfd76ea5fa05894ceb3baab38823fd1886eeb45437fcfd9b810a44717",
+      "tag": "latest",
       "architecture": "amd64",
       "version_date": DockerTimeString("2021-01-20T21:13:48.648135Z"),
       "open_update": {
@@ -90,11 +93,70 @@ def save_container_data(updated_containers: List[dict]) -> None:
 
 ## whats with selfmade/local images? Can I check the Images they build upon?
 
+
+
 # container discovery
+
+def image_name_splitter(full_image_name: str) -> Tuple[str, str, str]:
+  try:
+    tag_sep_index = full_image_name.index(":")
+    tag = full_image_name[tag_sep_index + 1:]
+    full_image_name = full_image_name[0:tag_sep_index]
+  except ValueError:
+    tag = ""
+  try:
+    repo_sep_index = full_image_name.index("/")
+    repo = full_image_name[0:repo_sep_index]
+    full_image_name = full_image_name[repo_sep_index + 1 :]
+  except ValueError:
+    repo = ""
+  image_name = full_image_name
+  return (repo, image_name, tag)
+
+def get_full_image_name(container: dict) -> str:
+  full_name = container["repo"] + "/" if container["repo"] else ""
+  full_name += container["image_name"]
+  full_name += ":" + container["tag"] if container["tag"] else ""
+  return full_name
+
 def container_discovery(containers: dict) -> dict:
-  # todo
   not_implemented_yet("container_discovery")
-  return {}
+  new_containers = {}
+  client = docker.from_env()
+  d_containers = client.containers.list(all=True)
+  for c in d_containers:
+    parsed_c_data = {}
+    c_data = c.attrs
+    id = c_data["Id"]
+
+    # move to next container if the container is already in the list
+    try:
+      if containers[id]:
+        continue
+    except KeyError:
+      pass
+
+    tmp_image = client.images.get(c_data["Image"]).attrs
+    parsed_c_data["version_date"] = DockerTimeString(tmp_image["Created"])
+    parsed_c_data["architecture"] = tmp_image["Architecture"]
+    parsed_c_data["is_local"] = len(tmp_image["RepoDigests"]) == 0
+    parsed_full_image_name = image_name_splitter(c_data["Config"]["Image"])
+
+    parsed_c_data["image_name"] = parsed_full_image_name[1]
+    if not parsed_c_data["is_local"]:
+      parsed_c_data["repo"] = parsed_full_image_name[0] if parsed_full_image_name[0] != "" else "library"
+    else:
+      parsed_c_data["repo"] = ""
+    parsed_c_data["tag"] = parsed_full_image_name[2]
+    parsed_c_data["image_id"] = c_data["Image"]
+  
+    parsed_c_data["open_update"] = {
+      "tag_update": None,
+      "new_tags": {}
+    }
+    new_containers[id] = parsed_c_data
+
+  return new_containers
 
 # update logic
 
@@ -177,7 +239,7 @@ def get_new_tags(container_data: dict, image_tags: List[dict]) -> Tuple[Union[di
           updated_tag_data[tag_name] = tag_date
       if container_data["version_date"] > DockerTimeString(tag["tag_last_pushed"]):
         got_relevant_tags = True
-    except TypeError:
+    except (TypeError, AttributeError):
       # Trigered by DTS creator.
       # if we reached a point where no push dates are given, we stop looking for older ones
       got_relevant_tags = True
@@ -219,7 +281,8 @@ def update_container(container: dict) -> dict:
 
 def dif_parser(old_containers: dict, updates: dict) -> List[dict]:
   dif = []
-  for image_name, u in updates.items():
+  for container_name, u in updates.items():
+    image_name = get_full_image_name(old_containers[container_name])
     container_dif = {
       "any_update": False,
       "tag_update": None,
@@ -228,19 +291,22 @@ def dif_parser(old_containers: dict, updates: dict) -> List[dict]:
     if not u["tag_update"]:
       pass
     elif ( 
-      not old_containers[image_name]["open_update"]["tag_update"] or
-      u["tag_update"] != old_containers[image_name]["open_update"]["tag_update"]
+      not old_containers[container_name]["open_update"]["tag_update"] or
+      u["tag_update"] != old_containers[container_name]["open_update"]["tag_update"]
       ):
+      container_dif["container_name"] = container_name
       container_dif["image_name"] = image_name
       container_dif["any_update"] = True
       container_dif["tag_update"] = u["tag_update"]
     for tag_name, version_date in u["new_tags"].items():
       try:
-        if version_date > old_containers[image_name]["open_update"]["new_tags"][tag_name]:
+        if version_date > old_containers[container_name]["open_update"]["new_tags"][tag_name]:
+          container_dif["container_name"] = container_name
           container_dif["image_name"] = image_name
           container_dif["any_update"] = True
           container_dif["new_tags"] += (tag_name, version_date) 
       except KeyError:
+        container_dif["container_name"] = container_name
         container_dif["image_name"] = image_name
         container_dif["any_update"] = True
         container_dif["new_tags"] += [(tag_name, version_date)]
@@ -249,14 +315,12 @@ def dif_parser(old_containers: dict, updates: dict) -> List[dict]:
   return dif
 
 def create_info(dif_list: List[dict]) -> Union[str, None]:
-  # todo
-  not_implemented_yet("create_info")
   info = ""
   for dif in dif_list:
     if not dif["any_update"]:
       return None
     else:
-      info += f"Updates for {dif['image_name']}:\n"
+      info += f"Updates for {dif['image_name']} ({dif['container_name']}):\n"
       if dif["tag_update"]:
         info += f"\nTag update: new version from {dif['tag_update']}.\n"
       if len(dif["new_tags"]) > 0:
@@ -264,6 +328,7 @@ def create_info(dif_list: List[dict]) -> Union[str, None]:
         for tuple in dif["new_tags"]:
 
           info += f"\n- {tuple[0]}:   {tuple[1]}"
+    info += "\n-----------------------------\n"
   return info
 
 def gather_update_info(old_containers: dict, updated_containers: dict) -> str:
@@ -286,11 +351,13 @@ def main():
   containers.update(newly_discovered_containers)
   updated_containers = {}
   for name, container in containers.items():
+    if container["is_local"]:
+      continue
     updated_container = update_container(container)
     updated_containers.update({name: updated_container})
   info = gather_update_info(containers, updated_containers)
-  send_info(info)
   print(info)
+  send_info(info)
   save_container_data(updated_containers)
   print(f"open-todos: {open_todos}")
 
