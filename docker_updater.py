@@ -3,7 +3,7 @@ import urllib.parse
 import datetime
 import dateutil.parser as parser
 import docker
-from typing import List, Union, Tuple
+from typing import List, Type, Union, Tuple
 
 
 # Errors
@@ -77,7 +77,7 @@ def load_running_containers() -> dict:
       "architecture": "amd64",
       "version_date": DockerTimeString("2021-01-20T21:13:48.648135Z"),
       "open_update": {
-        "tag_updates": None,
+        "tag_update": None,
         "new_tags": {}
         }
     }
@@ -88,7 +88,13 @@ def save_container_data(updated_containers: List[dict]) -> None:
   not_implemented_yet("save_container_data")
   return
 
-## whats with selfmade/local pictures? Can I check the Images they build upon?
+## whats with selfmade/local images? Can I check the Images they build upon?
+
+# container discovery
+def container_discovery(containers: dict) -> dict:
+  # todo
+  not_implemented_yet("container_discovery")
+  return {}
 
 # update logic
 
@@ -126,7 +132,7 @@ def check_update(old_container_or_tag_data: dict, new_tag_data: dict) -> Union[d
   else:
     return None
 
-def get_tag_updates(container_data: dict, image_tags: List[dict]) -> Union[dict, None]:
+def get_tag_update(container_data: dict, image_tags: List[dict]) -> Union[dict, None]:
   for tag_data in image_tags["results"]:
     if container_data["tag"] == tag_data["name"]:
       tag_update_data = check_update(container_data, tag_data)
@@ -183,7 +189,7 @@ def update_container(container: dict) -> dict:
   current_tag_done = False
   new_tags_done = False
   new_tags = {}
-  tag_updates = None
+  tag_update = None
   image_tags = {
     "next" : None
     }
@@ -194,8 +200,8 @@ def update_container(container: dict) -> dict:
     except Exception:
       raise DockerApiError ## from None
     if not current_tag_done:
-      tag_updates = get_tag_updates(container, image_tags)
-      if tag_updates:
+      tag_update = get_tag_update(container, image_tags)
+      if tag_update:
         current_tag_done = True
     if not new_tags_done:
       tmp, new_tags_done = get_new_tags(container, image_tags)
@@ -204,25 +210,31 @@ def update_container(container: dict) -> dict:
     next_image_tag_url = image_tags["next"]
     if (new_tags_done and current_tag_done) or next_image_tag_url == None:
       break
-  container["open_update"] = {
-    "tag_updates": tag_updates,
+
+  updates = {
+    "tag_update": tag_update,
     "new_tags": new_tags
     }
-  return container
+  return updates
 
-def dif_parser(old_containers: dict, updated_containers: dict) -> dict:
+def dif_parser(old_containers: dict, updates: dict) -> List[dict]:
   dif = []
-  for image_name, uc in updated_containers.items():
+  for image_name, u in updates.items():
     container_dif = {
       "any_update": False,
       "tag_update": None,
       "new_tags": []
       }
-    if uc["open_update"]["tag_updates"] != old_containers[image_name]["open_update"]["tag_updates"]:
+    if not u["tag_update"]:
+      pass
+    elif ( 
+      not old_containers[image_name]["open_update"]["tag_update"] or
+      u["tag_update"] != old_containers[image_name]["open_update"]["tag_update"]
+      ):
       container_dif["image_name"] = image_name
       container_dif["any_update"] = True
-      container_dif["tag_update"] = uc["open_update"]["tag_updates"]
-    for tag_name, version_date in uc["open_update"]["new_tags"].items():
+      container_dif["tag_update"] = u["tag_update"]
+    for tag_name, version_date in u["new_tags"].items():
       try:
         if version_date > old_containers[image_name]["open_update"]["new_tags"][tag_name]:
           container_dif["image_name"] = image_name
@@ -231,12 +243,28 @@ def dif_parser(old_containers: dict, updated_containers: dict) -> dict:
       except KeyError:
         container_dif["image_name"] = image_name
         container_dif["any_update"] = True
-        container_dif["new_tags"] += (tag_name, version_date)
+        container_dif["new_tags"] += [(tag_name, version_date)]
 
-def create_info(dif: List[dict]) -> Union[str, None]:
+    dif += [container_dif]
+  return dif
+
+def create_info(dif_list: List[dict]) -> Union[str, None]:
   # todo
   not_implemented_yet("create_info")
-  return None
+  info = ""
+  for dif in dif_list:
+    if not dif["any_update"]:
+      return None
+    else:
+      info += f"Updates for {dif['image_name']}:\n"
+      if dif["tag_update"]:
+        info += f"\nTag update: new version from {dif['tag_update']}.\n"
+      if len(dif["new_tags"]) > 0:
+        info += "\nNew Tags:\n"
+        for tuple in dif["new_tags"]:
+
+          info += f"\n- {tuple[0]}:   {tuple[1]}"
+  return info
 
 def gather_update_info(old_containers: dict, updated_containers: dict) -> str:
   dif = dif_parser(old_containers, updated_containers)
@@ -250,14 +278,19 @@ def send_info(info: str) -> None:
   not_implemented_yet("send_info")
   return
 
+
+
 def main():
   containers = load_running_containers()
+  newly_discovered_containers = container_discovery(containers)
+  containers.update(newly_discovered_containers)
   updated_containers = {}
   for name, container in containers.items():
     updated_container = update_container(container)
     updated_containers.update({name: updated_container})
   info = gather_update_info(containers, updated_containers)
   send_info(info)
+  print(info)
   save_container_data(updated_containers)
   print(f"open-todos: {open_todos}")
 
