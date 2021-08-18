@@ -29,7 +29,9 @@ containers_schema = {
           "tag_update": {"type": ["string", "null"]},
           "new_tags": {
             "type": "object",
-            "additionalProperties": {"type": "string"}
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         },
         "required": ["tag_update", "new_tags"]
@@ -57,14 +59,19 @@ def not_implemented_yet(function_name: str) -> None:
   open_todos += 1
   return
 
-def clean_string(str: str) -> str:
-  not_implemented_yet("clean_string")
+DOCKER_IMAGE_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+
+def clean_string(str: str, charseq: str) -> str:
+  for char in str:
+    if not char in charseq:
+      str = str.replace(char, "")
   return str
+def clean_url(str: str) -> str:
+  return clean_string(str, DOCKER_IMAGE_CHARS)
 
 url_quote = urllib.parse.quote
 open_todos = 0
 architecture = "architecture"
-
 
 
 # timestamp utils
@@ -119,34 +126,29 @@ def file_saver(path: str, data: str) -> bool:
     f = open(path, 'w')
     data = f.write(data)
     f.close()
-    return True
-  except:
-    print(f"Error saving file: {path}")
     return False
+  except Exception as e:
+    print(f"Error saving file: {path}")
+    return True
 
 
-def load_running_containers() -> dict:
-  # todo the loading
-  not_implemented_yet("load_running_containers")
+def load_running_containers() -> Tuple[dict, bool]:
   data = file_loader(data_path)
   if not data:
-    return {}
+    return {}, False
   else:
     try:
       containers = json.loads(data) 
       validate(containers, containers_schema)
-      return containers
+      return containers, False
     except Exception as e:
       print(f"JSONError: {e} \n\ncontinuing with no loaded containers.")
-      return {}
+      return {}, True
 
-def save_container_data(updated_containers: List[dict]) -> None:
-  # todo
-  not_implemented_yet("save_container_data")
-  return
-
-## whats with selfmade/local images? Can I check the Images they build upon?
-
+def save_container_data(updated_containers: dict) -> None:
+  converted_data = json.dumps(updated_containers)
+  saving_succeeded = file_saver(data_path, converted_data)
+  return saving_succeeded
 
 
 # container discovery
@@ -214,7 +216,7 @@ def container_discovery(containers: dict) -> dict:
 # update logic
 
 def get_image_tags(repo: str, image: str, next: Union[ None, str ] = None, page: int = 1) -> dict:
-  url = f"https://hub.docker.com/v2/repositories/{clean_string(repo)}/{clean_string(image)}/tags?page_size=100&page={clean_string(str(page))}"
+  url = f"https://hub.docker.com/v2/repositories/{clean_url(repo)}/{clean_url(image)}/tags?page_size=100&page={clean_url(str(page))}"
   if next != None:
     url = next
   r = requests.get(url)
@@ -300,7 +302,7 @@ def get_new_tags(container_data: dict, image_tags: List[dict]) -> Tuple[Union[di
       pass
   return updated_tag_data, got_relevant_tags
 
-def update_container(container: dict) -> dict:
+def get_container_update(container: dict) -> dict:
   current_tag_done = False
   new_tags_done = False
   new_tags = {}
@@ -364,14 +366,14 @@ def dif_parser(old_containers: dict, updates: dict) -> List[dict]:
         container_dif["any_update"] = True
         container_dif["new_tags"] += [(tag_name, version_date)]
 
-    dif += [container_dif]
+    dif += [container_dif] if container_dif["any_update"] else []
   return dif
 
 def create_info(dif_list: List[dict]) -> Union[str, None]:
   info = ""
   for dif in dif_list:
     if not dif["any_update"]:
-      return None
+      continue
     else:
       info += f"Updates for {dif['image_name']} ({dif['container_name']}):\n"
       if dif["tag_update"]:
@@ -397,19 +399,47 @@ def send_info(info: str) -> None:
   return
 
 def main():
-  containers = load_running_containers()
+  print(f"\n##################################################\n\nDocker-Updater run at: {datetime.datetime.now()} ")
+  containers, io_loading_error = load_running_containers()
+  errors = [] if not io_loading_error else ["io_loading_error"]
   newly_discovered_containers = container_discovery(containers)
   containers.update(newly_discovered_containers)
   updated_containers = {}
   for name, container in containers.items():
     if container["is_local"]:
       continue
-    updated_container = update_container(container)
-    updated_containers.update({name: updated_container})
-  info = gather_update_info(containers, updated_containers)
-  print(info)
-  send_info(info)
-  save_container_data(updated_containers)
+    try:
+      container_update = get_container_update(container)
+      updated_containers.update({name: container_update})
+    except DockerApiError as e:
+      print(e)
+      errors += ["DockerApiError"]
+      updated_containers.update({name: container["open_update"]})
+  dif = dif_parser(containers, updated_containers)
+  info = create_info(dif)
+  for update in dif:
+    new_tags = {}
+    for tag_name, date in update["new_tags"]:
+      new_tags[tag_name] = date
+    containers[update["container_name"]].update({
+      "open_update": {
+        "tag_update": update["tag_update"],
+        "new_tags": new_tags
+      }
+      })
+  io_saving_error = save_container_data(containers)
+  if io_saving_error:
+    errors += ["io_saving_error"]
+  if errors:
+    info += "\nErrors:\n"
+    for error in errors:
+      info += error + " "
+  
+  if info:
+    print(info)
+    send_info(info)
+  else:  
+    print("no updates.") 
   print(f"open-todos: {open_todos}")
 
 if __name__ == "__main__":
