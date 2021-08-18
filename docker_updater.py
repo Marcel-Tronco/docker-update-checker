@@ -1,9 +1,44 @@
-from docker.api import image
 import requests
 import urllib.parse
 import datetime
 import docker
 from typing import List, Union, Tuple
+import os
+import json
+from jsonschema import validate
+# from <custom package from args> import <custom_function from args> as send_info
+
+
+# json-schema
+
+containers_schema = {
+  "type": "object",
+  "additionalProperties": {
+    "type": "object",
+    "properties": {
+      "is_local": {"type": "boolean"},
+      "image_name": {"type": "string"},
+      "repo": {"type": ["null", "string"]},
+      "image_id": {"type": "string"},
+      "tag": {"type": ["null", "string"]},
+      "architecture": {"type": "string"}, 
+      "version_date": {"type": "string"}, 
+      "open_update": {
+        "type": "object",
+        "properties": {
+          "tag_update": {"type": ["string", "null"]},
+          "new_tags": {
+            "type": "object",
+            "additionalProperties": {"type": "string"}
+          }
+        },
+        "required": ["tag_update", "new_tags"]
+      }
+    },
+    "required": ["is_local", "image_name", "repo", "image_id", "tag", "architecture", "version_date", "open_update"]
+  }
+}
+
 
 # Errors
 
@@ -67,24 +102,43 @@ class DockerTimeString(str):
 
 # IO
 
+path = os.getcwd() + "/data"
+data_path = path + "/container_data.json"
+
+def file_loader(path: str) -> Union[str, None]:
+  try:
+    f = open(path, 'r')
+    data = f.read()
+    f.close()
+    return data
+  except FileNotFoundError:
+    return None
+
+def file_saver(path: str, data: str) -> bool:
+  try:
+    f = open(path, 'w')
+    data = f.write(data)
+    f.close()
+    return True
+  except:
+    print(f"Error saving file: {path}")
+    return False
+
+
 def load_running_containers() -> dict:
   # todo the loading
   not_implemented_yet("load_running_containers")
-  return {
-    "e55fc8bd648d1a459a8636f0e1817ba23ef7b2261fa3939971a92e47f07ccde2": {
-      "is_local": False,
-      "image_name": "postgres",
-      "repo": "library",
-      "image_id": "sha256:acf5fb8bfd76ea5fa05894ceb3baab38823fd1886eeb45437fcfd9b810a44717",
-      "tag": "latest",
-      "architecture": "amd64",
-      "version_date": DockerTimeString("2021-01-20T21:13:48.648135Z"),
-      "open_update": {
-        "tag_update": None,
-        "new_tags": {}
-        }
-    }
-  }
+  data = file_loader(data_path)
+  if not data:
+    return {}
+  else:
+    try:
+      containers = json.loads(data) 
+      validate(containers, containers_schema)
+      return containers
+    except Exception as e:
+      print(f"JSONError: {e} \n\ncontinuing with no loaded containers.")
+      return {}
 
 def save_container_data(updated_containers: List[dict]) -> None:
   # todo
@@ -120,7 +174,6 @@ def get_full_image_name(container: dict) -> str:
   return full_name
 
 def container_discovery(containers: dict) -> dict:
-  not_implemented_yet("container_discovery")
   new_containers = {}
   client = docker.from_env()
   d_containers = client.containers.list(all=True)
@@ -189,7 +242,7 @@ def check_update(old_container_or_tag_data: dict, new_tag_data: dict) -> Union[d
       break
   if not last_image_update: ## check ""== none" for DTS Objects
     return None
-  elif last_image_update > last_container_update:
+  elif DockerTimeString(last_image_update) > DockerTimeString(last_container_update):
     return last_image_update
   else:
     return None
@@ -235,9 +288,9 @@ def get_new_tags(container_data: dict, image_tags: List[dict]) -> Tuple[Union[di
       image_list = tag["images"]
       arch_image = get_arch_image(container_data[architecture], image_list)
       tag_date = DockerTimeString(arch_image["last_pushed"]) # Throws Type error if 
-      if( tag_date > container_data["version_date"]): 
+      if( DockerTimeString(tag_date) > DockerTimeString(container_data["version_date"])): 
           updated_tag_data[tag_name] = tag_date
-      if container_data["version_date"] > DockerTimeString(tag["tag_last_pushed"]):
+      if DockerTimeString(container_data["version_date"]) > DockerTimeString(tag["tag_last_pushed"]):
         got_relevant_tags = True
     except (TypeError, AttributeError):
       # Trigered by DTS creator.
@@ -292,7 +345,7 @@ def dif_parser(old_containers: dict, updates: dict) -> List[dict]:
       pass
     elif ( 
       not old_containers[container_name]["open_update"]["tag_update"] or
-      u["tag_update"] != old_containers[container_name]["open_update"]["tag_update"]
+      DockerTimeString(u["tag_update"]) != DockerTimeString(old_containers[container_name]["open_update"]["tag_update"])
       ):
       container_dif["container_name"] = container_name
       container_dif["image_name"] = image_name
@@ -300,7 +353,7 @@ def dif_parser(old_containers: dict, updates: dict) -> List[dict]:
       container_dif["tag_update"] = u["tag_update"]
     for tag_name, version_date in u["new_tags"].items():
       try:
-        if version_date > old_containers[container_name]["open_update"]["new_tags"][tag_name]:
+        if DockerTimeString(version_date) > DockerTimeString(old_containers[container_name]["open_update"]["new_tags"][tag_name]):
           container_dif["container_name"] = container_name
           container_dif["image_name"] = image_name
           container_dif["any_update"] = True
@@ -342,8 +395,6 @@ def send_info(info: str) -> None:
   # todo
   not_implemented_yet("send_info")
   return
-
-
 
 def main():
   containers = load_running_containers()
