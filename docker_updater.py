@@ -6,7 +6,10 @@ from typing import List, Union, Tuple
 import os
 import json
 from jsonschema import validate
-# from <custom package from args> import <custom_function from args> as send_info
+from urllib.parse import quote
+
+# from <custom package from env> import <custom_function from env> as send_info
+# could be handled with importlib.import_module()
 
 
 # json-schemata
@@ -101,6 +104,11 @@ IMAGETAGS_DH_SCHEMA = {
 class DockerApiError(Exception):
   def __init__(self):
     super().__init__("failed to retrieve tag data from docker hub")
+
+class NoTelegramEnvsError(Exception):
+  def __init__(self):
+    super().__init__("telegram bot id and/or chatid is not available.")
+
 
 # Basic Utils
 def test_tester():
@@ -451,9 +459,28 @@ def gather_update_info(old_containers: dict, updated_containers: dict) -> str:
 
 # notification logic
 
+TELEGRAM_BOT_ID = os.environ.get("TELEGRAM_BOT_ID")
+TELEGRAM_CHAT_ID = os.environ.get("TELGRAM_CHAT_ID")
+
+
+
+def telegramQueryBuilder(message, method="sendMessage"):
+  if TELEGRAM_BOT_ID and TELEGRAM_CHAT_ID:
+    return f"https://api.telegram.org/bot{TELEGRAM_BOT_ID}/{method}?chat_id={TELEGRAM_CHAT_ID}&text={message}"
+  else:
+    raise NoTelegramEnvsError
+
+
 def send_info(info: str) -> None:
-  # todo
-  not_implemented_yet("send_info")
+  # Telegram excepts only 4096 chars for a message, so in case we provide chunks
+  info_len = len(info)
+  chunk_size = 4096
+  full_chunks_num = info_len // chunk_size
+  chars_of_last_chunk = info_len % chunk_size
+  
+  for full_chunk in range(full_chunks_num):
+    requests.get(telegramQueryBuilder(info[full_chunk * chunk_size : (full_chunk + 1) * chunk_size]))
+  requests.get(telegramQueryBuilder(info[full_chunks_num * chunk_size :]))
   return
 
 def main():
@@ -497,8 +524,7 @@ def main():
     print(info)
     send_info(info)
   else:  
-    print("no updates.") 
-  print(f"open-todos: {open_todos}")
+    print("no updates.")
 
 if __name__ == "__main__":
   main()
