@@ -15,7 +15,7 @@ class DockerApiError(Exception):
 PATH = os.getcwd() + "/data"
 DATA_PATH = PATH + "/container_data.json"
 
-def load_running_containers() -> Tuple[dict, bool]:
+def load_saved_container_data() -> Tuple[dict, bool]:
   data = file_loader(DATA_PATH)
   if not data:
     return {}, False
@@ -62,14 +62,16 @@ def container_discovery(containers: dict) -> dict:
   new_containers = {}
   client = docker.from_env()
   d_containers = client.containers.list(all=True)
+  # Adding new containers
   for c in d_containers:
     parsed_c_data = {}
     c_data = c.attrs
     id = c_data["Id"]
 
-    # move to next container if the container is already in the list
+    # simply add the container if the container is already in the list
     try:
       if containers[id]:
+        new_containers[id] = containers[id]
         continue
     except KeyError:
       pass
@@ -278,13 +280,12 @@ def main():
   print(f"\n##################################################\n\nDocker-Updater run at: {datetime.datetime.now()} ")
 
   # Load Containers
-  containers, io_loading_error = load_running_containers()
+  containers, io_loading_error = load_saved_container_data()
   if io_loading_error:
     errors += ["io_loading_error"]
   
   # Discover newly launched/changed containers and remove deleted ones
-  newly_discovered_containers = container_discovery(containers)
-  containers.update(newly_discovered_containers)
+  containers = container_discovery(containers)
   container_updates = {}
 
   # Get Updates
