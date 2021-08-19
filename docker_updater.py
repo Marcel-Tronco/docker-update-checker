@@ -9,9 +9,9 @@ from jsonschema import validate
 # from <custom package from args> import <custom_function from args> as send_info
 
 
-# json-schema
+# json-schemata
 
-containers_schema = {
+CONTAINERS_SCHEMA = {
   "type": "object",
   "additionalProperties": {
     "type": "object",
@@ -41,6 +41,60 @@ containers_schema = {
   }
 }
 
+IMAGETAGS_DH_SCHEMA = {
+  "type": "object",
+  "properties": {
+    "count": {"type": "integer"},
+    "next": {"type": ["string", "null"]},
+    "previous": {"type": ["string", "null"] },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "creator": {"type": ["null", "integer"]},
+          "id": {"type": ["null", "integer"]},
+          "image_id": {"type": ["string", "null"]},
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "architecture": {"type": "string"},
+                "features": {},
+                "digest": {"type": "string"},
+                "os": {},
+                "os_features": {},
+                "os_version": {},
+                "variant": {},
+                "size": {},
+                "status": {},
+                "last_pulled": {"type": ["string", "null"]},
+                "last_pushed": {"type": ["string", "null"]}
+              },
+              "additionalProperties": False,
+              "minProperties": 11
+            }
+          },
+          "last_updated": {"type": ["string", "null"]},
+          "last_updater": {"type": ["null", "integer"]},
+          "last_updater_username": {"type": ["string", "null"]},
+          "name": {"type": ["string", "null"]},
+          "repository": {"type": "integer"},
+          "full_size": {"type": "integer"},
+          "v2": {"type": "boolean"},
+          "tag_status": {},
+          "tag_last_pulled": {"type": ["string", "null"]},
+          "tag_last_pushed": {"type": ["string", "null"]}
+        },
+        "additionalProperties": False,
+        "minProperties": 14
+      }
+    }
+  },
+  "additionalProperties": False,
+  "minProperties": 4
+}
 
 # Errors
 
@@ -139,7 +193,7 @@ def load_running_containers() -> Tuple[dict, bool]:
   else:
     try:
       containers = json.loads(data) 
-      validate(containers, containers_schema)
+      validate(containers, CONTAINERS_SCHEMA)
       return containers, False
     except Exception as e:
       print(f"JSONError: {e} \n\ncontinuing with no loaded containers.")
@@ -221,6 +275,10 @@ def get_image_tags(repo: str, image: str, next: Union[ None, str ] = None, page:
     url = next
   r = requests.get(url)
   json = r.json()
+  try:
+    validate(json, IMAGETAGS_DH_SCHEMA)
+  except Exception as e:
+    print(e)
   return json
 
 def image_tag_parser(image_tag_results: dict) -> dict:
