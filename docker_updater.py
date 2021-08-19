@@ -1,207 +1,28 @@
-import requests
-import urllib.parse
-import datetime
-import docker
+import requests, datetime, docker, os, json
 from typing import List, Union, Tuple
-import os
-import json
-from jsonschema import validate
-from urllib.parse import quote
+import js_validate
+from basic_utils import test_tester, clean_docker_str, file_saver, file_loader
+from timestamp_utils import DockerTimeString
+from infosender import send_info
 
-# from <custom package from env> import <custom_function from env> as send_info
-# could be handled with importlib.import_module()
-
-
-# json-schemata
-
-CONTAINERS_SCHEMA = {
-  "type": "object",
-  "additionalProperties": {
-    "type": "object",
-    "properties": {
-      "is_local": {"type": "boolean"},
-      "image_name": {"type": "string"},
-      "repo": {"type": ["null", "string"]},
-      "image_id": {"type": "string"},
-      "tag": {"type": ["null", "string"]},
-      "architecture": {"type": "string"}, 
-      "version_date": {"type": "string"}, 
-      "open_update": {
-        "type": "object",
-        "properties": {
-          "tag_update": {"type": ["string", "null"]},
-          "new_tags": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          }
-        },
-        "required": ["tag_update", "new_tags"]
-      }
-    },
-    "required": ["is_local", "image_name", "repo", "image_id", "tag", "architecture", "version_date", "open_update"]
-  }
-}
-
-IMAGETAGS_DH_SCHEMA = {
-  "type": "object",
-  "properties": {
-    "count": {"type": "integer"},
-    "next": {"type": ["string", "null"]},
-    "previous": {"type": ["string", "null"] },
-    "results": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "creator": {"type": ["null", "integer"]},
-          "id": {"type": ["null", "integer"]},
-          "image_id": {"type": ["string", "null"]},
-          "images": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "architecture": {"type": "string"},
-                "features": {},
-                "digest": {"type": "string"},
-                "os": {},
-                "os_features": {},
-                "os_version": {},
-                "variant": {},
-                "size": {},
-                "status": {},
-                "last_pulled": {"type": ["string", "null"]},
-                "last_pushed": {"type": ["string", "null"]}
-              },
-              "additionalProperties": False,
-              "minProperties": 11
-            }
-          },
-          "last_updated": {"type": ["string", "null"]},
-          "last_updater": {"type": ["null", "integer"]},
-          "last_updater_username": {"type": ["string", "null"]},
-          "name": {"type": ["string", "null"]},
-          "repository": {"type": "integer"},
-          "full_size": {"type": "integer"},
-          "v2": {"type": "boolean"},
-          "tag_status": {},
-          "tag_last_pulled": {"type": ["string", "null"]},
-          "tag_last_pushed": {"type": ["string", "null"]}
-        },
-        "additionalProperties": False,
-        "minProperties": 14
-      }
-    }
-  },
-  "additionalProperties": False,
-  "minProperties": 4
-}
-
-# Errors
 
 class DockerApiError(Exception):
   def __init__(self):
     super().__init__("failed to retrieve tag data from docker hub")
 
-class NoTelegramEnvsError(Exception):
-  def __init__(self):
-    super().__init__("telegram bot id and/or chatid is not available.")
-
-
-# Basic Utils
-def test_tester():
-  return True
-
-
-def not_implemented_yet(function_name: str) -> None:
-  print(f"{function_name} not implemented yet ¯\_(ツ)_/¯")
-  global open_todos
-  open_todos += 1
-  return
-
-DOCKER_IMAGE_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
-
-def clean_string(str: str, charseq: str) -> str:
-  for char in str:
-    if not char in charseq:
-      str = str.replace(char, "")
-  return str
-def clean_url(str: str) -> str:
-  return clean_string(str, DOCKER_IMAGE_CHARS)
-
-url_quote = urllib.parse.quote
-open_todos = 0
-architecture = "architecture"
-
-
-# timestamp utils
-
-class DockerTimeString(str):
-  DOCKER_TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%f'
-  @classmethod
-  def datetime_to_dts(cls, datetime: datetime.datetime) -> str:
-    return datetime.strftime(DockerTimeString.DOCKER_TIME_FORMAT)
-  @classmethod
-  def dts_to_datetime(cls, time_string: str) -> datetime.datetime:
-    time_string = time_string.rstrip("Z")
-    end_index = 26 if len(time_string) >= 26 else None
-    time_string = time_string[0:end_index]
-    return datetime.datetime.strptime(time_string, DockerTimeString.DOCKER_TIME_FORMAT)
-  def __new__(cls, docker_time_obj: Union[str, datetime.datetime]):
-    if type(docker_time_obj) == str:
-      return str.__new__(cls, cls.datetime_to_dts(cls.dts_to_datetime(docker_time_obj)))
-    elif type(docker_time_obj) == cls:
-      return str(docker_time_obj)
-    else: # type(docker_time_obj) == datetime.datetime:
-      return str.__new__(cls, cls.datetime_to_dts(docker_time_obj))
-  def __lt__(self, other):
-    return self.dts_to_datetime(self) < self.dts_to_datetime(other)
-  def __eq__(self, other):
-    return self.dts_to_datetime(self) == self.dts_to_datetime(other)
-  def __le__(self, other):
-    return not other.__lt__(self)
-  def __ne__(self, other):
-    return not self.__eq__(other)
-  def __gt__(self, other):
-    return other.__lt__(self)
-  def __ge__(self, other):
-    return other.__le__(self)
-
 # IO
 
-path = os.getcwd() + "/data"
-data_path = path + "/container_data.json"
-
-def file_loader(path: str) -> Union[str, None]:
-  try:
-    f = open(path, 'r')
-    data = f.read()
-    f.close()
-    return data
-  except FileNotFoundError:
-    return None
-
-def file_saver(path: str, data: str) -> bool:
-  try:
-    f = open(path, 'w')
-    data = f.write(data)
-    f.close()
-    return False
-  except Exception as e:
-    print(f"Error saving file: {path}")
-    return True
-
+PATH = os.getcwd() + "/data"
+DATA_PATH = PATH + "/container_data.json"
 
 def load_running_containers() -> Tuple[dict, bool]:
-  data = file_loader(data_path)
+  data = file_loader(DATA_PATH)
   if not data:
     return {}, False
   else:
     try:
       containers = json.loads(data) 
-      validate(containers, CONTAINERS_SCHEMA)
+      js_validate.containers(containers)
       return containers, False
     except Exception as e:
       print(f"JSONError: {e} \n\ncontinuing with no loaded containers.")
@@ -209,7 +30,7 @@ def load_running_containers() -> Tuple[dict, bool]:
 
 def save_container_data(updated_containers: dict) -> None:
   converted_data = json.dumps(updated_containers)
-  saving_succeeded = file_saver(data_path, converted_data)
+  saving_succeeded = file_saver(DATA_PATH, converted_data)
   return saving_succeeded
 
 
@@ -278,13 +99,13 @@ def container_discovery(containers: dict) -> dict:
 # update logic
 
 def get_image_tags(repo: str, image: str, next: Union[ None, str ] = None, page: int = 1) -> dict:
-  url = f"https://hub.docker.com/v2/repositories/{clean_url(repo)}/{clean_url(image)}/tags?page_size=100&page={clean_url(str(page))}"
+  url = f"https://hub.docker.com/v2/repositories/{clean_docker_str(repo)}/{clean_docker_str(image)}/tags?page_size=100&page={clean_docker_str(str(page))}"
   if next != None:
     url = next
   r = requests.get(url)
   json = r.json()
   try:
-    validate(json, IMAGETAGS_DH_SCHEMA)
+    js_validate.dh_imagetags(json)
   except Exception as e:
     print(e)
   return json
@@ -301,11 +122,11 @@ def taglist_dict_creator_translator(image_tag_results: List[dict]) -> dict:
     lookup_dict[image_tag_results[i]["name"]] = i
   return lookup_dict
 
-def check_update(old_container_or_tag_data: dict, new_tag_data: dict) -> Union[dict, None]:
+def check_tag_update(old_container_or_tag_data: dict, new_tag_data: dict) -> Union[dict, None]:
   last_container_update = DockerTimeString(old_container_or_tag_data["version_date"])
   last_image_update = None
   for image in new_tag_data["images"]:
-    if image[architecture] == old_container_or_tag_data[architecture]:
+    if image["architecture"] == old_container_or_tag_data["architecture"]:
       last_image_update =  DockerTimeString(image["last_pushed"])
       break
   if not last_image_update: ## check ""== none" for DTS Objects
@@ -318,7 +139,7 @@ def check_update(old_container_or_tag_data: dict, new_tag_data: dict) -> Union[d
 def get_tag_update(container_data: dict, image_tags: List[dict]) -> Union[dict, None]:
   for tag_data in image_tags["results"]:
     if container_data["tag"] == tag_data["name"]:
-      tag_update_data = check_update(container_data, tag_data)
+      tag_update_data = check_tag_update(container_data, tag_data)
       return tag_update_data
   return None
 
@@ -330,7 +151,7 @@ def get_tag_data(tag_name: str, image_tags: dict) -> Union[dict, None]:
 
 def get_arch_image(target_arch: str, image_list: List[dict]) -> Union[dict, None]:
   for image in image_list:
-    if target_arch == image[architecture]:
+    if target_arch == image["architecture"]:
       return image
   return None
 
@@ -342,7 +163,7 @@ def get_new_tags(container_data: dict, image_tags: List[dict]) -> Tuple[Union[di
     # if tags disappear on docker hub/ if theres, no push data they will be erased here too
     try:
       image_list = get_tag_data(tag_name, image_tags)["images"]
-      arch_image = get_arch_image(container_data[architecture], image_list)
+      arch_image = get_arch_image(container_data["architecture"], image_list)
       updated_tag_data[tag_name] = max(version_date, DockerTimeString(arch_image["last_pushed"])) # in case last_pushed is None max() throws error        
     except (KeyError, TypeError): # in case the tag_name isn't present
       pass
@@ -354,7 +175,7 @@ def get_new_tags(container_data: dict, image_tags: List[dict]) -> Tuple[Union[di
       if tag_name in existing_tags_set:
         continue
       image_list = tag["images"]
-      arch_image = get_arch_image(container_data[architecture], image_list)
+      arch_image = get_arch_image(container_data["architecture"], image_list)
       tag_date = DockerTimeString(arch_image["last_pushed"]) # Throws Type error if 
       if( DockerTimeString(tag_date) > DockerTimeString(container_data["version_date"])): 
           updated_tag_data[tag_name] = tag_date
@@ -452,56 +273,38 @@ def create_info(dif_list: List[dict]) -> Union[str, None]:
     info += "\n-----------------------------\n"
   return info
 
-def gather_update_info(old_containers: dict, updated_containers: dict) -> str:
-  dif = dif_parser(old_containers, updated_containers)
-  info = create_info(dif)
-  return info
-
-# notification logic
-
-TELEGRAM_BOT_ID = os.environ.get("TELEGRAM_BOT_ID")
-TELEGRAM_CHAT_ID = os.environ.get("TELGRAM_CHAT_ID")
-
-
-
-def telegramQueryBuilder(message, method="sendMessage"):
-  if TELEGRAM_BOT_ID and TELEGRAM_CHAT_ID:
-    return f"https://api.telegram.org/bot{TELEGRAM_BOT_ID}/{method}?chat_id={TELEGRAM_CHAT_ID}&text={message}"
-  else:
-    raise NoTelegramEnvsError
-
-
-def send_info(info: str) -> None:
-  # Telegram excepts only 4096 chars for a message, so in case we provide chunks
-  info_len = len(info)
-  chunk_size = 4096
-  full_chunks_num = info_len // chunk_size
-  chars_of_last_chunk = info_len % chunk_size
-  
-  for full_chunk in range(full_chunks_num):
-    requests.get(telegramQueryBuilder(info[full_chunk * chunk_size : (full_chunk + 1) * chunk_size]))
-  requests.get(telegramQueryBuilder(info[full_chunks_num * chunk_size :]))
-  return
-
 def main():
+  errors = []
   print(f"\n##################################################\n\nDocker-Updater run at: {datetime.datetime.now()} ")
+
+  # Load Containers
   containers, io_loading_error = load_running_containers()
-  errors = [] if not io_loading_error else ["io_loading_error"]
+  if io_loading_error:
+    errors += ["io_loading_error"]
+  
+  # Discover newly launched/changed containers and remove deleted ones
   newly_discovered_containers = container_discovery(containers)
   containers.update(newly_discovered_containers)
-  updated_containers = {}
+  container_updates = {}
+
+  # Get Updates
   for name, container in containers.items():
     if container["is_local"]:
       continue
     try:
       container_update = get_container_update(container)
-      updated_containers.update({name: container_update})
+      container_updates.update({name: container_update})
     except DockerApiError as e:
       print(e)
       errors += ["DockerApiError"]
-      updated_containers.update({name: container["open_update"]})
-  dif = dif_parser(containers, updated_containers)
+      container_updates.update({name: container["open_update"]})
+
+  #Get dif
+  dif = dif_parser(containers, container_updates)
+  # Create info message
   info = create_info(dif)
+
+  # Save updates
   for update in dif:
     new_tags = {}
     for tag_name, date in update["new_tags"]:
@@ -515,11 +318,14 @@ def main():
   io_saving_error = save_container_data(containers)
   if io_saving_error:
     errors += ["io_saving_error"]
+
+  # add errors to info
   if errors:
     info += "\nErrors:\n"
     for error in errors:
       info += error + " "
   
+  # send info
   if info:
     print(info)
     send_info(info)

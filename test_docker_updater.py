@@ -2,7 +2,6 @@ import unittest
 from docker_updater import test_tester, main, get_image_tags, update_container
 
 class TestStringMethods(unittest.TestCase):
-
     def test_test(self):
       self.assertEqual(test_tester(), True)
     def test_main(self):
