@@ -1,0 +1,10 @@
+datenbeispiel.json
+parsed.json
+.gitignore
+requests
+workinglog.md
+__pycache__
+data
+test.py
+example_container.json
+test*

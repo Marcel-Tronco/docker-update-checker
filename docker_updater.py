@@ -30,6 +30,8 @@ def load_saved_container_data() -> Tuple[dict, bool]:
 
 def save_container_data(updated_containers: dict) -> None:
   converted_data = json.dumps(updated_containers)
+  if not os.path.isdir(PATH):
+    os.mkdir(PATH)
   saving_succeeded = file_saver(DATA_PATH, converted_data)
   return saving_succeeded
 

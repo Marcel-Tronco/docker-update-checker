@@ -6,7 +6,7 @@ class NoTelegramEnvsError(Exception):
     super().__init__("telegram bot id and/or chatid is not available.")
 
 TELEGRAM_BOT_ID = os.environ.get("TELEGRAM_BOT_ID")
-TELEGRAM_CHAT_ID = os.environ.get("TELGRAM_CHAT_ID")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 def telegramQueryBuilder(message, method="sendMessage"):
   if TELEGRAM_BOT_ID and TELEGRAM_CHAT_ID:
